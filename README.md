@@ -15,7 +15,10 @@ The executable is `ffxiv-tui` for clarity and easy discovery.
 - Optional HPS columns
 - 24-player alliance mode
 - Job-colored or plain bars
+- Privacy Mode for hiding names, WebSocket URL, and connection errors with terminal shade characters
+- Automatic update notice from GitHub Releases
 - Automatic reconnect
+- Clean Ctrl+C shutdown
 - Multi-language UI: English, Spanish, Chinese, French, German, Korean, Japanese
 - Configurable host, port, path, or full WebSocket URL
 
@@ -73,13 +76,87 @@ Show HPS:
 ./ffxiv-tui --host FFXIV_PC_IP --show-hps
 ```
 
+## Update notice
+
+Aetherless Meter checks GitHub Releases for updates by default and shows a high-contrast notice in the header when a newer version is available.
+
+The TUI starts first; the update check runs in the background after a short delay.
+
+Default update target:
+
+```text
+pinksingularity/aetherless-meter
+```
+
+Disable update checks:
+
+```bash
+./ffxiv-tui --no-check-updates
+```
+
+Use a different repo for update checks:
+
+```bash
+./ffxiv-tui --update-repo owner/repo
+```
+
+Tune update check timing:
+
+```bash
+./ffxiv-tui --update-delay 2 --update-timeout 1.5
+```
+## Privacy Mode
+
+Hide names using terminal shade characters.
+
+Hide everyone:
+
+```bash
+./ffxiv-tui --host FFXIV_PC_IP --privacy-mode all
+```
+
+Hide only yourself:
+
+```bash
+./ffxiv-tui --host FFXIV_PC_IP --privacy-mode self
+```
+
+Hide everyone except yourself:
+
+```bash
+./ffxiv-tui --host FFXIV_PC_IP --privacy-mode others
+```
+
+Mask styles:
+
+```bash
+./ffxiv-tui --privacy-mode all --privacy-style light
+./ffxiv-tui --privacy-mode all --privacy-style medium
+./ffxiv-tui --privacy-mode all --privacy-style heavy
+./ffxiv-tui --privacy-mode all --privacy-style mixed
+```
+
+Styles use `░`, `▒`, `▓`, or a mixed pattern.
+
+## WebSocket options
+
 Use a full WebSocket URL manually:
 
 ```bash
 ./ffxiv-tui --ws ws://FFXIV_PC_IP:10501/ws
 ```
 
+If your IINACT build uses `/` instead of `/ws`:
+
+```bash
+./ffxiv-tui --host FFXIV_PC_IP --path /
+```
+
 ## Languages
+
+CLI `--help` output is always shown in English. The TUI language is still controlled by `--lang` and defaults to `auto`.
+
+
 
 Default language mode is `auto`. It tries to use your system locale and falls back to English.
 
@@ -111,7 +188,7 @@ For a second PC/laptop:
 
 1. Enable the WebSocket Server in IINACT / OverlayPlugin.
 2. Set the listen/bind IP to `0.0.0.0`.
-3. Set port `10501`
+3. Keep port `10501`, unless you changed it.
 4. Connect from the second machine using the FFXIV machine's LAN IP:
 
 ```bash
@@ -119,6 +196,15 @@ For a second PC/laptop:
 ```
 
 Do not expose this WebSocket port to the internet. Use it only on your local network.
+
+## Versioning
+
+Public releases use a simple `v1.0`, `v1.1`, `v1.2` style version scheme.
+
+- Major milestone releases use `.0`
+- Smaller feature/fix releases increase by `.1`
+
+Current version: **v1.1**
 
 ## Development note
 
@@ -140,6 +226,9 @@ It's simple: I have a low-resolution monitor that doesn't let me use overlays in
 
 ## Tested on:
 
+
 Arch Linux / Shell (TUI), i3 370M w/4gb RAM as second machine for showing metrics
 
 CachyOS / Kitty, Ghostty, Konsole, Alacritty, Ryzen 3 3200G, 20GB RAM
+
+(Windows compatibility have not been tested)

@@ -9,7 +9,11 @@ Examples:
   ffxiv-tui --host FFXIV_PC_IP
   ffxiv-tui --host FFXIV_PC_IP --alliance --bar-mode job --bar-width 10
   ffxiv-tui --host FFXIV_PC_IP --lang es
+  ffxiv-tui --host FFXIV_PC_IP --privacy-mode all
+  ffxiv-tui --host FFXIV_PC_IP --privacy-mode self
   ffxiv-tui --ws ws://127.0.0.1:10501/ws --dump
+
+Version: 1.1
 
 Dependencies:
   pip install rich websockets
@@ -19,9 +23,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
+import signal
 import locale
 import time
+import urllib.request
+import urllib.error
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -40,6 +48,11 @@ from rich.text import Text
 
 
 console = Console()
+
+APP_VERSION = "1.1"
+DEFAULT_UPDATE_REPO = "pinksingularity/aetherless-meter"
+DEFAULT_UPDATE_DELAY_SECONDS = 2.0
+DEFAULT_UPDATE_TIMEOUT_SECONDS = 1.5
 
 SUPPORTED_LANGS = ("auto", "en", "es", "zh", "fr", "de", "ko", "ja")
 
@@ -61,7 +74,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "player_detected": "Detected player",
         "error": "Error",
         "waiting_combatdata": "Waiting for CombatData...",
-        "footer": "Ctrl+C to quit • --alliance for 24 rows • --bar-mode job/plain",
+        "footer": "Ctrl+C to quit • --help for options",
         "col_rank": "#",
         "col_job": "Job",
         "col_name": "Name",
@@ -74,6 +87,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "col_crit": "Crit%",
         "col_dh": "DH%",
         "col_max_hit": "Max Hit",
+        "privacy": "Privacy",
+        "privacy_off": "off",
+        "privacy_self": "self",
+        "privacy_others": "others",
+        "privacy_all": "all",
+        "help_privacy_mode": "Hide names for privacy. Choices: off, self, others, all.",
+        "help_privacy_style": "Privacy mask style. light=░, medium=▒, heavy=▓, mixed=░▒▓.",        "update_available": "Update available",
+        "help_check_updates": "Check GitHub Releases for updates. Enabled by default.",
+        "help_no_check_updates": "Disable GitHub update check.",
+        "help_update_repo": "GitHub repo used for update checks, in owner/repo format.",
+
         "help_ws": "Full WebSocket URL. Overrides --host, --port and --path.",
         "help_host": "IINACT/OverlayPlugin host IP. Default: 127.0.0.1",
         "help_port": "IINACT/OverlayPlugin WebSocket port. Default: 10501",
@@ -106,7 +130,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "player_detected": "Jugador detectado",
         "error": "Error",
         "waiting_combatdata": "Esperando CombatData...",
-        "footer": "Ctrl+C para salir • --alliance para 24 filas • --bar-mode job/plain",
+        "footer": "Ctrl+C para salir • --help para opciones",
         "col_rank": "#",
         "col_job": "Job",
         "col_name": "Nombre",
@@ -119,6 +143,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "col_crit": "Crit%",
         "col_dh": "DH%",
         "col_max_hit": "Max Hit",
+        "privacy": "Privacidad",
+        "privacy_off": "apagado",
+        "privacy_self": "propio",
+        "privacy_others": "otros",
+        "privacy_all": "todos",
+        "help_privacy_mode": "Oculta nombres por privacidad. Opciones: off, self, others, all.",
+        "help_privacy_style": "Estilo de máscara. light=░, medium=▒, heavy=▓, mixed=░▒▓.",        "update_available": "Actualización disponible",
+        "help_check_updates": "Revisa GitHub Releases para buscar actualizaciones. Activado por default.",
+        "help_no_check_updates": "Desactiva la búsqueda de actualizaciones en GitHub.",
+        "help_update_repo": "Repo de GitHub para buscar actualizaciones, en formato owner/repo.",
+
         "help_ws": "URL completa del WebSocket. Reemplaza --host, --port y --path.",
         "help_host": "IP del host IINACT/OverlayPlugin. Default: 127.0.0.1",
         "help_port": "Puerto WebSocket de IINACT/OverlayPlugin. Default: 10501",
@@ -151,7 +186,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "player_detected": "检测到玩家",
         "error": "错误",
         "waiting_combatdata": "等待 CombatData...",
-        "footer": "Ctrl+C 退出 • --alliance 显示 24 行 • --bar-mode job/plain",
+        "footer": "Ctrl+C 退出 • --help 查看选项",
         "col_rank": "#",
         "col_job": "职业",
         "col_name": "名称",
@@ -164,6 +199,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "col_crit": "暴击%",
         "col_dh": "直击%",
         "col_max_hit": "最大命中",
+        "privacy": "隐私",
+        "privacy_off": "关闭",
+        "privacy_self": "自己",
+        "privacy_others": "其他人",
+        "privacy_all": "全部",
+        "help_privacy_mode": "隐藏名称以保护隐私。选项: off, self, others, all。",
+        "help_privacy_style": "隐私遮罩样式。light=░, medium=▒, heavy=▓, mixed=░▒▓。",        "update_available": "有可用更新",
+        "help_check_updates": "检查 GitHub Releases 更新。默认启用。",
+        "help_no_check_updates": "禁用 GitHub 更新检查。",
+        "help_update_repo": "用于更新检查的 GitHub 仓库，格式为 owner/repo。",
+
         "help_ws": "完整 WebSocket URL。会覆盖 --host、--port 和 --path。",
         "help_host": "IINACT/OverlayPlugin 主机 IP。默认: 127.0.0.1",
         "help_port": "IINACT/OverlayPlugin WebSocket 端口。默认: 10501",
@@ -196,7 +242,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "player_detected": "Joueur détecté",
         "error": "Erreur",
         "waiting_combatdata": "En attente de CombatData...",
-        "footer": "Ctrl+C pour quitter • --alliance pour 24 lignes • --bar-mode job/plain",
+        "footer": "Ctrl+C pour quitter • --help pour les options",
         "col_rank": "#",
         "col_job": "Job",
         "col_name": "Nom",
@@ -209,6 +255,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "col_crit": "Crit%",
         "col_dh": "DH%",
         "col_max_hit": "Max Hit",
+        "privacy": "Confidentialité",
+        "privacy_off": "désactivé",
+        "privacy_self": "soi",
+        "privacy_others": "autres",
+        "privacy_all": "tous",
+        "help_privacy_mode": "Masque les noms pour la confidentialité. Choix: off, self, others, all.",
+        "help_privacy_style": "Style du masque. light=░, medium=▒, heavy=▓, mixed=░▒▓.",        "update_available": "Mise à jour disponible",
+        "help_check_updates": "Vérifie les mises à jour via GitHub Releases. Activé par défaut.",
+        "help_no_check_updates": "Désactive la vérification des mises à jour GitHub.",
+        "help_update_repo": "Dépôt GitHub utilisé pour les mises à jour, au format owner/repo.",
+
         "help_ws": "URL WebSocket complète. Remplace --host, --port et --path.",
         "help_host": "IP de l'hôte IINACT/OverlayPlugin. Défaut: 127.0.0.1",
         "help_port": "Port WebSocket IINACT/OverlayPlugin. Défaut: 10501",
@@ -241,7 +298,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "player_detected": "Erkannter Spieler",
         "error": "Fehler",
         "waiting_combatdata": "Warte auf CombatData...",
-        "footer": "Ctrl+C zum Beenden • --alliance für 24 Zeilen • --bar-mode job/plain",
+        "footer": "Ctrl+C zum Beenden • --help für Optionen",
         "col_rank": "#",
         "col_job": "Job",
         "col_name": "Name",
@@ -254,6 +311,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "col_crit": "Crit%",
         "col_dh": "DH%",
         "col_max_hit": "Max Hit",
+        "privacy": "Privatsphäre",
+        "privacy_off": "aus",
+        "privacy_self": "selbst",
+        "privacy_others": "andere",
+        "privacy_all": "alle",
+        "help_privacy_mode": "Blendet Namen zum Schutz der Privatsphäre aus. Optionen: off, self, others, all.",
+        "help_privacy_style": "Maskierungsstil. light=░, medium=▒, heavy=▓, mixed=░▒▓.",        "update_available": "Update verfügbar",
+        "help_check_updates": "Prüft GitHub Releases auf Updates. Standardmäßig aktiviert.",
+        "help_no_check_updates": "Deaktiviert die GitHub-Updateprüfung.",
+        "help_update_repo": "GitHub-Repository für Updateprüfungen im Format owner/repo.",
+
         "help_ws": "Vollständige WebSocket-URL. Überschreibt --host, --port und --path.",
         "help_host": "IINACT/OverlayPlugin Host-IP. Standard: 127.0.0.1",
         "help_port": "IINACT/OverlayPlugin WebSocket-Port. Standard: 10501",
@@ -286,7 +354,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "player_detected": "감지된 플레이어",
         "error": "오류",
         "waiting_combatdata": "CombatData 대기 중...",
-        "footer": "Ctrl+C 종료 • --alliance 24행 • --bar-mode job/plain",
+        "footer": "Ctrl+C 종료 • --help 옵션",
         "col_rank": "#",
         "col_job": "직업",
         "col_name": "이름",
@@ -299,6 +367,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "col_crit": "극대%",
         "col_dh": "직격%",
         "col_max_hit": "최대타",
+        "privacy": "프라이버시",
+        "privacy_off": "꺼짐",
+        "privacy_self": "본인",
+        "privacy_others": "다른 사람",
+        "privacy_all": "전체",
+        "help_privacy_mode": "프라이버시를 위해 이름을 숨깁니다. 선택: off, self, others, all.",
+        "help_privacy_style": "마스크 스타일. light=░, medium=▒, heavy=▓, mixed=░▒▓.",        "update_available": "업데이트 있음",
+        "help_check_updates": "GitHub Releases에서 업데이트를 확인합니다. 기본으로 활성화됩니다.",
+        "help_no_check_updates": "GitHub 업데이트 확인을 비활성화합니다.",
+        "help_update_repo": "업데이트 확인에 사용할 GitHub 저장소(owner/repo 형식).",
+
         "help_ws": "전체 WebSocket URL. --host, --port, --path를 덮어씁니다.",
         "help_host": "IINACT/OverlayPlugin 호스트 IP. 기본값: 127.0.0.1",
         "help_port": "IINACT/OverlayPlugin WebSocket 포트. 기본값: 10501",
@@ -331,7 +410,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "player_detected": "検出プレイヤー",
         "error": "エラー",
         "waiting_combatdata": "CombatData 待機中...",
-        "footer": "Ctrl+C で終了 • --alliance で24行 • --bar-mode job/plain",
+        "footer": "Ctrl+C で終了 • --help でオプション表示",
         "col_rank": "#",
         "col_job": "ジョブ",
         "col_name": "名前",
@@ -344,6 +423,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "col_crit": "クリ%",
         "col_dh": "DH%",
         "col_max_hit": "最大ヒット",
+        "privacy": "プライバシー",
+        "privacy_off": "オフ",
+        "privacy_self": "自分",
+        "privacy_others": "他人",
+        "privacy_all": "全員",
+        "help_privacy_mode": "プライバシーのため名前を隠します。選択: off, self, others, all。",
+        "help_privacy_style": "マスクの種類。light=░, medium=▒, heavy=▓, mixed=░▒▓。",        "update_available": "更新があります",
+        "help_check_updates": "GitHub Releases で更新を確認します。既定で有効です。",
+        "help_no_check_updates": "GitHub 更新チェックを無効にします。",
+        "help_update_repo": "更新チェックに使う GitHub リポジトリ（owner/repo形式）。",
+
         "help_ws": "完全な WebSocket URL。--host、--port、--path を上書きします。",
         "help_host": "IINACT/OverlayPlugin のホストIP。既定: 127.0.0.1",
         "help_port": "IINACT/OverlayPlugin WebSocket ポート。既定: 10501",
@@ -397,6 +487,16 @@ class MeterState:
     primary_player: str = ""
 
 
+@dataclass
+class UpdateState:
+    enabled: bool = True
+    checking: bool = False
+    latest_version: str = ""
+    latest_url: str = ""
+    update_available: bool = False
+    last_error: str = ""
+
+
 
 JOB_STYLES = {
     "Pld": "bright_blue",
@@ -422,6 +522,64 @@ JOB_STYLES = {
     "Pct": "bright_magenta",
     "Blu": "bright_magenta",
 }
+
+
+
+def normalize_version_tag(tag: str) -> str:
+    return tag.strip().lstrip("vV")
+
+
+def version_tuple(version: str) -> tuple[int, ...]:
+    parts = []
+    for part in normalize_version_tag(version).split("."):
+        match = re.match(r"(\d+)", part)
+        if not match:
+            break
+        parts.append(int(match.group(1)))
+    return tuple(parts)
+
+
+def is_newer_version(latest: str, current: str) -> bool:
+    latest_tuple = version_tuple(latest)
+    current_tuple = version_tuple(current)
+    if not latest_tuple or not current_tuple:
+        return False
+
+    max_len = max(len(latest_tuple), len(current_tuple))
+    latest_tuple = latest_tuple + (0,) * (max_len - len(latest_tuple))
+    current_tuple = current_tuple + (0,) * (max_len - len(current_tuple))
+    return latest_tuple > current_tuple
+
+
+async def check_for_updates(update_state: UpdateState, repo: str, current_version: str = APP_VERSION, timeout: float = DEFAULT_UPDATE_TIMEOUT_SECONDS) -> None:
+    """Check GitHub Releases once. Silent on failure by design."""
+    update_state.enabled = True
+    update_state.checking = True
+
+    def fetch_latest_release() -> dict[str, Any]:
+        url = f"https://api.github.com/repos/{repo}/releases/latest"
+        request = urllib.request.Request(
+            url,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": f"Aetherless-Meter/{current_version}",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    try:
+        data = await asyncio.to_thread(fetch_latest_release)
+        tag = str(data.get("tag_name", "")).strip()
+        html_url = str(data.get("html_url", "")).strip()
+
+        update_state.latest_version = tag
+        update_state.latest_url = html_url
+        update_state.update_available = is_newer_version(tag, current_version)
+    except Exception as exc:
+        update_state.last_error = f"{type(exc).__name__}: {exc}"
+    finally:
+        update_state.checking = False
 
 
 def pick(data: dict[str, Any], *keys: str, default: str = "-") -> str:
@@ -501,6 +659,52 @@ def display_name(raw_name: str, data: dict[str, Any], state: MeterState, manual_
     return raw_name
 
 
+def is_self_row(raw_name: str, shown_name: str, state: MeterState, manual_player_name: str = "") -> bool:
+    """Best-effort detection for the current player row."""
+    candidates = {value for value in [manual_player_name, state.primary_player] if value}
+    if raw_name.upper() == "YOU":
+        return True
+    return shown_name in candidates
+
+
+def privacy_label(lang: str, mode: str) -> str:
+    return tr(lang, f"privacy_{mode}")
+
+
+def mask_name(name: str, style: str = "medium") -> str:
+    """Create a terminal-friendly privacy mask while preserving rough name width."""
+    if not name:
+        return name
+
+    chars = {"light": "░", "medium": "▒", "heavy": "▓"}
+    if style == "mixed":
+        pattern = "░▒▓"
+        return "".join(" " if ch.isspace() else pattern[i % len(pattern)] for i, ch in enumerate(name))
+
+    fill = chars.get(style, "▒")
+    return "".join(" " if ch.isspace() else fill for ch in name)
+
+
+def apply_privacy_to_name(
+    name: str,
+    raw_name: str,
+    state: MeterState,
+    manual_player_name: str,
+    privacy_mode: str,
+    privacy_style: str,
+) -> str:
+    if privacy_mode == "off":
+        return name
+
+    self_row = is_self_row(raw_name, name, state, manual_player_name)
+    should_mask = (
+        privacy_mode == "all"
+        or (privacy_mode == "self" and self_row)
+        or (privacy_mode == "others" and not self_row)
+    )
+    return mask_name(name, privacy_style) if should_mask else name
+
+
 def normalize_combat_data(message: dict[str, Any]) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
     encounter = message.get("Encounter")
     if not isinstance(encounter, dict):
@@ -548,7 +752,7 @@ def update_from_message(state: MeterState, message: dict[str, Any]) -> None:
     state.last_update = time.time()
 
 
-def build_header(state: MeterState, ws_url: str, show_hps: bool, limit: int, bar_mode: str, lang: str) -> Panel:
+def build_header(state: MeterState, update_state: UpdateState, ws_url: str, show_hps: bool, limit: int, bar_mode: str, privacy_mode: str, privacy_style: str, lang: str) -> Panel:
     encounter = state.encounter
     title = pick(encounter, "title", "Title", "Encounter", default="...")
     duration = pick(encounter, "duration", "DURATION", "Duration", default="00:00")
@@ -566,9 +770,15 @@ def build_header(state: MeterState, ws_url: str, show_hps: bool, limit: int, bar
 
     header = Text()
     header.append(tr(lang, "app_title"), style="bold")
+    if update_state.update_available:
+        latest = update_state.latest_version or "new"
+        header.append(f"  [{tr(lang, 'update_available')}: {latest}]", style="bold reverse")
     header.append(" — ")
     header.append(tr(lang, "byline"), style="dim")
-    header.append(f"\n{status}  •  {tr(lang, 'rows')}: {limit}  •  {tr(lang, 'bars')}: {bar_mode}\n")
+    privacy_text = ""
+    if privacy_mode != "off":
+        privacy_text = f"  •  {tr(lang, 'privacy')}: {privacy_label(lang, privacy_mode)}"
+    header.append(f"\n{status}  •  {tr(lang, 'rows')}: {limit}  •  {tr(lang, 'bars')}: {bar_mode}{privacy_text}\n")
     header.append(
         f"{tr(lang, 'encounter')}: {title}  •  {tr(lang, 'time')}: {duration}  •  {tr(lang, 'raid_dps')}: {rdps}"
     )
@@ -576,10 +786,20 @@ def build_header(state: MeterState, ws_url: str, show_hps: bool, limit: int, bar
         header.append(f"  •  {tr(lang, 'raid_hps')}: {rhps}")
     header.append(f"  •  {tr(lang, 'damage')}: {damage}\n")
     if state.primary_player:
-        header.append(f"{tr(lang, 'player_detected')}: {state.primary_player}\n", style="dim")
-    header.append(f"WS: {ws_url}", style="dim")
+        detected_player = state.primary_player
+        if privacy_mode in {"self", "all"}:
+            detected_player = mask_name(detected_player, privacy_style)
+        header.append(f"{tr(lang, 'player_detected')}: {detected_player}\n", style="dim")
+    ws_display = ws_url
+    if privacy_mode != "off":
+        ws_display = mask_name(ws_display, privacy_style)
+    header.append(f"WS: {ws_display}", style="dim")
+
     if state.last_error:
-        header.append(f"\n{tr(lang, 'error')}: {state.last_error}", style="bold")
+        error_display = state.last_error
+        if privacy_mode != "off":
+            error_display = mask_name(error_display, privacy_style)
+        header.append(f"\n{tr(lang, 'error')}: {error_display}", style="bold")
 
     return Panel(header, box=box.ROUNDED)
 
@@ -592,6 +812,8 @@ def build_table(
     player_name: str,
     bar_mode: str,
     bar_width: int,
+    privacy_mode: str,
+    privacy_style: str,
     lang: str,
 ) -> Table:
     table = Table(box=box.SIMPLE_HEAVY, expand=True)
@@ -633,6 +855,7 @@ def build_table(
     for idx, (dps_value, hps_value, raw_name, data) in enumerate(rows[:limit], start=1):
         job = pick(data, "Job", "job", "JOB", default="-")
         name = display_name(raw_name, data, state, player_name)
+        name = apply_privacy_to_name(name, raw_name, state, player_name, privacy_mode, privacy_style)
         dps = f"{dps_value:,.1f}" if dps_value else pick(data, "ENCDPS", "encdps", "DPS", default="-")
         hps = f"{hps_value:,.1f}" if hps_value else pick(data, "ENCHPS", "enchps", "HPS", default="-")
         damage = fmt_intish(data.get("damage") or data.get("Damage"))
@@ -660,6 +883,7 @@ def build_table(
 
 def build_screen(
     state: MeterState,
+    update_state: UpdateState,
     ws_url: str,
     limit: int,
     show_limit_break: bool,
@@ -667,11 +891,13 @@ def build_screen(
     player_name: str,
     bar_mode: str,
     bar_width: int,
+    privacy_mode: str,
+    privacy_style: str,
     lang: str,
 ):
     return Group(
-        build_header(state, ws_url, show_hps, limit, bar_mode, lang),
-        build_table(state, limit, show_limit_break, show_hps, player_name, bar_mode, bar_width, lang),
+        build_header(state, update_state, ws_url, show_hps, limit, bar_mode, privacy_mode, privacy_style, lang),
+        build_table(state, limit, show_limit_break, show_hps, player_name, bar_mode, bar_width, privacy_mode, privacy_style, lang),
         Align.left(Text(tr(lang, "footer"), style="dim")),
     )
 
@@ -710,6 +936,7 @@ async def websocket_loop(state: MeterState, ws_url: str, dump: bool) -> None:
 
 async def ui_loop(
     state: MeterState,
+    update_state: UpdateState,
     ws_url: str,
     limit: int,
     show_limit_break: bool,
@@ -717,18 +944,40 @@ async def ui_loop(
     player_name: str,
     bar_mode: str,
     bar_width: int,
+    privacy_mode: str,
+    privacy_style: str,
     refresh_per_second: int,
     lang: str,
 ) -> None:
     with Live(
-        build_screen(state, ws_url, limit, show_limit_break, show_hps, player_name, bar_mode, bar_width, lang),
+        build_screen(state, update_state, ws_url, limit, show_limit_break, show_hps, player_name, bar_mode, bar_width, privacy_mode, privacy_style, lang),
         console=console,
         refresh_per_second=refresh_per_second,
         screen=True,
     ) as live:
         while True:
-            live.update(build_screen(state, ws_url, limit, show_limit_break, show_hps, player_name, bar_mode, bar_width, lang))
+            live.update(build_screen(state, update_state, ws_url, limit, show_limit_break, show_hps, player_name, bar_mode, bar_width, privacy_mode, privacy_style, lang))
             await asyncio.sleep(1 / max(refresh_per_second, 1))
+
+
+
+async def delayed_check_for_updates(
+    update_state: UpdateState,
+    repo: str,
+    current_version: str = APP_VERSION,
+    delay: float = DEFAULT_UPDATE_DELAY_SECONDS,
+    timeout: float = DEFAULT_UPDATE_TIMEOUT_SECONDS,
+) -> None:
+    """Let the TUI draw first, then check for updates in the background."""
+    try:
+        if delay > 0:
+            await asyncio.sleep(delay)
+        await check_for_updates(update_state, repo, current_version, timeout)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        # Update checks should never disrupt the meter.
+        return
 
 
 def build_ws_url(args: argparse.Namespace) -> str:
@@ -743,43 +992,65 @@ def build_ws_url(args: argparse.Namespace) -> str:
 
 
 def parse_args() -> argparse.Namespace:
+    # Keep CLI help in English for consistency/readability across locales.
+    # The TUI language itself is still controlled by --lang and defaults to auto.
+    help_lang = "en"
+
     lang_parser = argparse.ArgumentParser(add_help=False)
-    lang_parser.add_argument("--lang", choices=SUPPORTED_LANGS, default="auto")
-    known, _ = lang_parser.parse_known_args()
-    lang = resolve_lang(known.lang)
+    lang_parser.add_argument("--lang", choices=SUPPORTED_LANGS, default="auto", help=tr(help_lang, "help_lang"))
 
     examples = """Examples:
   ffxiv-tui
   ffxiv-tui --host FFXIV_PC_IP
   ffxiv-tui --host FFXIV_PC_IP --alliance --bar-mode job --bar-width 10
   ffxiv-tui --host FFXIV_PC_IP --lang es
+  ffxiv-tui --host FFXIV_PC_IP --privacy-mode all
+  ffxiv-tui --host FFXIV_PC_IP --privacy-mode self
   ffxiv-tui --ws ws://127.0.0.1:10501/ws --dump
 """
 
     parser = argparse.ArgumentParser(
-        description=tr(lang, "description"),
+        description=tr(help_lang, "description"),
         parents=[lang_parser],
         epilog=examples,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--ws", default="", help=tr(lang, "help_ws"))
-    parser.add_argument("--host", default="127.0.0.1", help=tr(lang, "help_host"))
-    parser.add_argument("--port", type=int, default=10501, help=tr(lang, "help_port"))
-    parser.add_argument("--path", default="/ws", help=tr(lang, "help_path"))
-    parser.add_argument("--limit", type=int, default=8, help=tr(lang, "help_limit"))
-    parser.add_argument("--alliance", action="store_true", help=tr(lang, "help_alliance"))
-    parser.add_argument("--refresh", type=int, default=4, help=tr(lang, "help_refresh"))
-    parser.add_argument("--show-limit-break", action="store_true", help=tr(lang, "help_show_lb"))
-    parser.add_argument("--show-hps", action="store_true", help=tr(lang, "help_show_hps"))
-    parser.add_argument("--player-name", default="", help=tr(lang, "help_player_name"))
+    parser.add_argument("--ws", default="", help=tr(help_lang, "help_ws"))
+    parser.add_argument("--host", default="127.0.0.1", help=tr(help_lang, "help_host"))
+    parser.add_argument("--port", type=int, default=10501, help=tr(help_lang, "help_port"))
+    parser.add_argument("--path", default="/ws", help=tr(help_lang, "help_path"))
+    update_group = parser.add_mutually_exclusive_group()
+    update_group.add_argument("--check-updates", dest="check_updates", action="store_true", default=True, help=tr(help_lang, "help_check_updates"))
+    update_group.add_argument("--no-check-updates", dest="check_updates", action="store_false", help=tr(help_lang, "help_no_check_updates"))
+    parser.add_argument("--update-repo", default=DEFAULT_UPDATE_REPO, help=tr(help_lang, "help_update_repo"))
+    parser.add_argument("--update-delay", type=float, default=DEFAULT_UPDATE_DELAY_SECONDS, help="Seconds to wait after startup before checking for updates.")
+    parser.add_argument("--update-timeout", type=float, default=DEFAULT_UPDATE_TIMEOUT_SECONDS, help="Network timeout in seconds for update checks.")
+    parser.add_argument("--limit", type=int, default=8, help=tr(help_lang, "help_limit"))
+    parser.add_argument("--alliance", action="store_true", help=tr(help_lang, "help_alliance"))
+    parser.add_argument("--refresh", type=int, default=4, help=tr(help_lang, "help_refresh"))
+    parser.add_argument("--show-limit-break", action="store_true", help=tr(help_lang, "help_show_lb"))
+    parser.add_argument("--show-hps", action="store_true", help=tr(help_lang, "help_show_hps"))
+    parser.add_argument("--player-name", default="", help=tr(help_lang, "help_player_name"))
+    parser.add_argument(
+        "--privacy-mode",
+        choices=["off", "self", "others", "all"],
+        default="off",
+        help=tr(help_lang, "help_privacy_mode"),
+    )
+    parser.add_argument(
+        "--privacy-style",
+        choices=["light", "medium", "heavy", "mixed"],
+        default="medium",
+        help=tr(help_lang, "help_privacy_style"),
+    )
     parser.add_argument(
         "--bar-mode",
         choices=["job", "plain"],
         default="job",
-        help=tr(lang, "help_bar_mode"),
+        help=tr(help_lang, "help_bar_mode"),
     )
-    parser.add_argument("--bar-width", type=int, default=18, help=tr(lang, "help_bar_width"))
-    parser.add_argument("--dump", action="store_true", help=tr(lang, "help_dump"))
+    parser.add_argument("--bar-width", type=int, default=18, help=tr(help_lang, "help_bar_width"))
+    parser.add_argument("--dump", action="store_true", help=tr(help_lang, "help_dump"))
     args = parser.parse_args()
     args.lang = resolve_lang(args.lang)
     return args
@@ -789,13 +1060,26 @@ async def main() -> None:
     args = parse_args()
 
     state = MeterState()
+    update_state = UpdateState(enabled=args.check_updates)
     limit = 24 if args.alliance else args.limit
     ws_url = build_ws_url(args)
 
-    reader = asyncio.create_task(websocket_loop(state, ws_url, args.dump))
-    ui = asyncio.create_task(
+    stop_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    signal_handlers_installed = False
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, stop_event.set)
+            signal_handlers_installed = True
+        except (NotImplementedError, RuntimeError):
+            pass
+
+    reader_task = asyncio.create_task(websocket_loop(state, ws_url, args.dump), name="websocket_loop")
+    ui_task = asyncio.create_task(
         ui_loop(
             state,
+            update_state,
             ws_url,
             limit,
             args.show_limit_break,
@@ -803,17 +1087,59 @@ async def main() -> None:
             args.player_name,
             args.bar_mode,
             args.bar_width,
+            args.privacy_mode,
+            args.privacy_style,
             args.refresh,
             args.lang,
-        )
+        ),
+        name="ui_loop",
     )
+    core_tasks = [reader_task, ui_task]
+    background_tasks = []
+
+    if args.check_updates:
+        background_tasks.append(
+            asyncio.create_task(
+                delayed_check_for_updates(
+                    update_state,
+                    args.update_repo,
+                    APP_VERSION,
+                    args.update_delay,
+                    args.update_timeout,
+                ),
+                name="delayed_check_for_updates",
+            )
+        )
+
+    signal_task = asyncio.create_task(stop_event.wait(), name="signal_wait") if signal_handlers_installed else None
 
     try:
-        await asyncio.gather(reader, ui)
-    except KeyboardInterrupt:
-        reader.cancel()
-        ui.cancel()
+        wait_tasks = core_tasks + ([signal_task] if signal_task else [])
+        done, _ = await asyncio.wait(wait_tasks, return_when=asyncio.FIRST_COMPLETED)
+
+        # If the user pressed Ctrl+C/SIGTERM, signal_task is done and we just exit.
+        # If a core task crashed, surface that exception instead of hanging silently.
+        for task in done:
+            if task is not signal_task:
+                task.result()
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
+    finally:
+        tasks_to_cancel = core_tasks + background_tasks + ([signal_task] if signal_task else [])
+        for task in tasks_to_cancel:
+            if task and not task.done():
+                task.cancel()
+
+        with contextlib.suppress(BaseException):
+            await asyncio.gather(*[task for task in tasks_to_cancel if task], return_exceptions=True)
+
+
+def run() -> None:
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    run()
