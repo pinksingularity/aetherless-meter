@@ -2,6 +2,8 @@
 
 **A minimal FFXIV TUI meter by Pink Singularity / Nixie.**
 
+<img width="1024" height="447" alt="image" src="https://github.com/user-attachments/assets/9c5f3766-c664-4d25-9db1-57689734a99b" />
+
 A terminal combat meter for **IINACT / OverlayPlugin WebSocket** data.
 
 It can run on the same machine as FFXIV, or on a second lightweight Linux laptop/mini PC over LAN.
