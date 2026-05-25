@@ -4,6 +4,9 @@
 
 Un medidor de combate para terminal usando datos del **WebSocket de IINACT / OverlayPlugin**.
 
+<img width="1024" height="447" alt="image" src="https://github.com/user-attachments/assets/1ceb3b6c-b27b-4819-87de-8adf90ddefe0" />
+
+
 Puede correr en la misma PC de FFXIV o en una laptop/mini PC ligera por LAN.
 
 El ejecutable sigue siendo `ffxiv-tui` para que sea claro y fácil de encontrar.
