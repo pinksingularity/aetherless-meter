@@ -4,6 +4,8 @@
 
 A terminal combat meter for **IINACT / OverlayPlugin WebSocket** data.
 
+<img width="1023" height="369" alt="597725864-6208b44b-0ec6-4906-a684-6e7db8cb6f5a" src="https://github.com/user-attachments/assets/0f26d3d5-370f-4229-8bcb-805fd9bde060" />
+
 Aetherless Meter is Linux-first and designed for terminal-based, lightweight, second-screen, or minimal setups.
 
 The executable/script entry remains `ffxiv-tui` for clarity, while the installed launcher is `aetherless-meter`.
