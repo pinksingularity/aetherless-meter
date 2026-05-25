@@ -79,12 +79,6 @@ Use a full WebSocket URL manually:
 ./ffxiv-tui --ws ws://FFXIV_PC_IP:10501/ws
 ```
 
-If your IINACT build uses `/` instead of `/ws`:
-
-```bash
-./ffxiv-tui --host FFXIV_PC_IP --path /
-```
-
 ## Languages
 
 Default language mode is `auto`. It tries to use your system locale and falls back to English.
@@ -117,7 +111,7 @@ For a second PC/laptop:
 
 1. Enable the WebSocket Server in IINACT / OverlayPlugin.
 2. Set the listen/bind IP to `0.0.0.0`.
-3. Keep port `10501`, unless you changed it.
+3. Set port `10501`
 4. Connect from the second machine using the FFXIV machine's LAN IP:
 
 ```bash
