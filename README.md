@@ -122,7 +122,7 @@ Do not expose this WebSocket port to the internet. Use it only on your local net
 
 ## Development note
 
-Parts of this project were created with AI assistance and reviewed/tested by the maintainer.
+Parts of this project were created with AI assistance and reviewed/tested by the maintainer. The accuracy of languages other than Spanish and English may vary.
 
 The maintainer is responsible for the code, behavior, packaging, and releases.
 
@@ -130,13 +130,16 @@ The maintainer is responsible for the code, behavior, packaging, and releases.
 
 This project is unofficial and not affiliated with Square Enix, ACT, OverlayPlugin, or IINACT.
 
-Use third-party tools responsibly and privately.
+Use third-party tools responsibly and privately. Remember, these kinds of tools are meant to help you improve, not to yell at others. If that’s the case, please refrain from using this tool.
 
 ## FAQ: ?
 
 Why this exists?
+
 It's simple: I have a low-resolution monitor that doesn't let me use overlays in the game. To avoid having everything look cluttered, I decided to dust off a 16-year-old PC to display metrics, which saves me the hassle of a cluttered screen and gives that old machine a new lease on life.
 
 ## Tested on:
+
 Arch Linux / Shell (TUI), i3 370M w/4gb RAM as second machine for showing metrics
+
 CachyOS / Kitty, Ghostty, Konsole, Alacritty, Ryzen 3 3200G, 20GB RAM
