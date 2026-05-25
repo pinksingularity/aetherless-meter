@@ -10,10 +10,11 @@ Examples:
   ffxiv-tui --host FFXIV_PC_IP --alliance --bar-mode job --bar-width 10
   ffxiv-tui --host FFXIV_PC_IP --lang es
   ffxiv-tui --host FFXIV_PC_IP --privacy-mode all
+  ffxiv-tui --host FFXIV_PC_IP --score-mode role
   ffxiv-tui --host FFXIV_PC_IP --privacy-mode self
   ffxiv-tui --ws ws://127.0.0.1:10501/ws --dump
 
-Version: 1.1
+Version: 2.0
 
 Dependencies:
   pip install rich websockets
@@ -26,30 +27,249 @@ import asyncio
 import contextlib
 import json
 import signal
+import subprocess
+import sys
 import locale
+import os
+import shutil
 import time
 import urllib.request
 import urllib.error
 from dataclasses import dataclass, field
 from typing import Any
+from pathlib import Path
+
+
+def _early_arg_value(flag: str, default: str) -> str:
+    """Tiny arg reader used before third-party dependencies are imported."""
+    if flag not in sys.argv:
+        return default
+    try:
+        index = sys.argv.index(flag)
+        return sys.argv[index + 1]
+    except (ValueError, IndexError):
+        return default
+
+
+def _detect_shell_config() -> tuple[str, Path | None, str]:
+    """Detect bash/zsh/fish and return the config file to update."""
+    shell_path = os.environ.get("SHELL", "")
+    shell_name = Path(shell_path).name.lower()
+
+    if shell_name == "fish":
+        return "fish", Path.home() / ".config" / "fish" / "config.fish", "exec fish"
+    if shell_name == "zsh":
+        return "zsh", Path.home() / ".zshrc", "source ~/.zshrc"
+    if shell_name == "bash":
+        return "bash", Path.home() / ".bashrc", "source ~/.bashrc"
+
+    # Fallback: choose an existing config if one is obvious.
+    candidates = [
+        ("fish", Path.home() / ".config" / "fish" / "config.fish", "exec fish"),
+        ("zsh", Path.home() / ".zshrc", "source ~/.zshrc"),
+        ("bash", Path.home() / ".bashrc", "source ~/.bashrc"),
+    ]
+    for name, path, reload_hint in candidates:
+        if path.exists():
+            return name, path, reload_hint
+
+    return shell_name or "unknown", None, ""
+
+
+def _path_block(shell_name: str) -> str:
+    marker_start = "# >>> Aetherless Meter PATH >>>"
+    marker_end = "# <<< Aetherless Meter PATH <<<"
+
+    if shell_name == "fish":
+        body = (
+            'if test -d "$HOME/.local/bin"; and not contains -- "$HOME/.local/bin" $PATH\n'
+            '    set -gx PATH "$HOME/.local/bin" $PATH\n'
+            "end"
+        )
+    else:
+        body = (
+            'if [ -d "$HOME/.local/bin" ] && ! echo ":$PATH:" | grep -q ":$HOME/.local/bin:"; then\n'
+            '    export PATH="$HOME/.local/bin:$PATH"\n'
+            "fi"
+        )
+
+    return f"\n{marker_start}\n{body}\n{marker_end}\n"
+
+
+def _ensure_local_bin_in_shell_path() -> tuple[Path | None, str, str]:
+    """Append a guarded PATH block to the detected shell config."""
+    shell_name, config_path, reload_hint = _detect_shell_config()
+    if config_path is None:
+        return None, shell_name, reload_hint
+
+    block = _path_block(shell_name)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    current = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+    if "Aetherless Meter PATH" not in current:
+        with config_path.open("a", encoding="utf-8") as handle:
+            if current and not current.endswith("\n"):
+                handle.write("\n")
+            handle.write(block)
+
+    return config_path, shell_name, reload_hint
+
+
+def _early_install(command_name: str = "aetherless-meter", modify_path: bool = True) -> None:
+    """Install without requiring rich/websockets to be importable first."""
+    app_version = "2.0"
+    install_dir = Path.home() / ".local" / "share" / "aetherless-meter"
+    venv_dir = install_dir / "venv"
+    bin_dir = Path.home() / ".local" / "bin"
+    installed_script = install_dir / "ffxiv_tui.py"
+    launcher = bin_dir / command_name
+
+    install_dir.mkdir(parents=True, exist_ok=True)
+    bin_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"Installing Aetherless Meter {app_version}...")
+
+    if not venv_dir.exists():
+        print(f"Creating private virtual environment: {venv_dir}")
+        subprocess.check_call([sys.executable, "-m", "venv", str(venv_dir)])
+
+    python_bin = venv_dir / "bin" / "python"
+    if not python_bin.exists():
+        python_bin = venv_dir / "Scripts" / "python.exe"
+
+    if not python_bin.exists():
+        raise RuntimeError(f"Could not find Python inside virtual environment: {venv_dir}")
+
+    print("Installing dependencies: rich, websockets")
+    subprocess.check_call([str(python_bin), "-m", "pip", "install", "--upgrade", "pip"])
+    subprocess.check_call([str(python_bin), "-m", "pip", "install", "rich", "websockets"])
+
+    shutil.copy2(Path(__file__).resolve(), installed_script)
+    installed_script.chmod(0o755)
+
+    launcher.write_text(
+        "#!/bin/sh\n"
+        f'exec "{python_bin}" "{installed_script}" "$@"\n',
+        encoding="utf-8",
+    )
+    launcher.chmod(0o755)
+
+    config_path = None
+    shell_name = "unknown"
+    reload_hint = ""
+
+    if modify_path:
+        config_path, shell_name, reload_hint = _ensure_local_bin_in_shell_path()
+
+    print("")
+    print("Installed successfully.")
+    print(f"Launcher: {launcher}")
+    print(f"Script:   {installed_script}")
+    print(f"Python:   {python_bin}")
+
+    if modify_path:
+        print("")
+        if config_path is not None:
+            print(f"PATH config updated for {shell_name}: {config_path}")
+            print("Your current terminal may not see the new PATH until you reload it.")
+            print("Restart your terminal, or reload your shell config:")
+            print(f"  {reload_hint}")
+        else:
+            print("Could not detect bash, zsh, or fish config automatically.")
+            print("Add this to your shell PATH manually:")
+            print('  export PATH="$HOME/.local/bin:$PATH"')
+    else:
+        print("")
+        print("PATH modification skipped.")
+        print("If your shell cannot find the short command, run the full launcher path or add ~/.local/bin to your PATH.")
+
+    print("")
+    print("You can run it immediately with:")
+    print(f"  {launcher}")
+    print("")
+    print("After restarting/reloading your shell, you can run it with:")
+    print(f"  {command_name}")
+
+
+def _early_uninstall(command_name: str = "aetherless-meter") -> None:
+    """Uninstall without requiring rich/websockets."""
+    install_dir = Path.home() / ".local" / "share" / "aetherless-meter"
+    launcher = Path.home() / ".local" / "bin" / command_name
+
+    removed = []
+
+    if launcher.exists():
+        launcher.unlink()
+        removed.append(str(launcher))
+
+    if install_dir.exists():
+        shutil.rmtree(install_dir)
+        removed.append(str(install_dir))
+
+    if removed:
+        print("Removed:")
+        for item in removed:
+            print(f"  {item}")
+    else:
+        print("Nothing to remove.")
+
+
+if __name__ == "__main__" and ("--install" in sys.argv or "--uninstall" in sys.argv):
+    _command_name = _early_arg_value("--install-name", "aetherless-meter")
+    _modify_path = "--no-modify-path" not in sys.argv
+    try:
+        if "--uninstall" in sys.argv:
+            _early_uninstall(_command_name)
+        else:
+            _early_install(_command_name, _modify_path)
+    except subprocess.CalledProcessError as exc:
+        print("")
+        print("Install command failed.")
+        print(f"Command exited with code: {exc.returncode}")
+        print("Make sure Python venv and pip are available on this system.")
+        sys.exit(exc.returncode or 1)
+    except Exception as exc:
+        print("")
+        print(f"Install failed: {type(exc).__name__}: {exc}")
+        sys.exit(1)
+    sys.exit(0)
+
+
+
+def _missing_dependency_exit(package: str) -> None:
+    print(f"Missing dependency: {package}")
+    print("")
+    print("Install Aetherless Meter with:")
+    print("  python ffxiv_tui.py --install")
+    print("")
+    print("Or install dependencies manually:")
+    print("  python -m pip install rich websockets")
+    sys.exit(1)
+
 
 try:
-    from websockets.asyncio.client import connect
-except ImportError:
-    from websockets import connect  # type: ignore
+    try:
+        from websockets.asyncio.client import connect
+    except ImportError:
+        from websockets import connect  # type: ignore
+except ModuleNotFoundError:
+    _missing_dependency_exit("websockets")
 
-from rich import box
-from rich.align import Align
-from rich.console import Console, Group
-from rich.live import Live
-from rich.panel import Panel
-from rich.table import Table
-from rich.text import Text
+try:
+    from rich import box
+    from rich.align import Align
+    from rich.console import Console, Group
+    from rich.live import Live
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.text import Text
+except ModuleNotFoundError:
+    _missing_dependency_exit("rich")
 
 
 console = Console()
 
-APP_VERSION = "1.1"
+APP_VERSION = "2.0"
 DEFAULT_UPDATE_REPO = "pinksingularity/aetherless-meter"
 DEFAULT_UPDATE_DELAY_SECONDS = 2.0
 DEFAULT_UPDATE_TIMEOUT_SECONDS = 1.5
@@ -96,7 +316,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "help_privacy_style": "Privacy mask style. light=░, medium=▒, heavy=▓, mixed=░▒▓.",        "update_available": "Update available",
         "help_check_updates": "Check GitHub Releases for updates. Enabled by default.",
         "help_no_check_updates": "Disable GitHub update check.",
-        "help_update_repo": "GitHub repo used for update checks, in owner/repo format.",
+        "help_update_repo": "GitHub repo used for update checks, in owner/repo format.",        "help_install": "Install a global launcher into ~/.local/bin and exit.",
+        "help_uninstall": "Remove the global launcher and installed script, then exit.",
+        "help_install_name": "Command name for --install/--uninstall. Default: aetherless-meter.",
+        "help_no_modify_path": "Do not modify shell config/PATH during --install.",        "score": "Score",
+        "col_score": "Rel%",
+        "help_score_mode": "Optional local DPS-based relative score. off, overall, role, or job. Not an FFLogs parse.",
+
+
 
         "help_ws": "Full WebSocket URL. Overrides --host, --port and --path.",
         "help_host": "IINACT/OverlayPlugin host IP. Default: 127.0.0.1",
@@ -152,7 +379,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "help_privacy_style": "Estilo de máscara. light=░, medium=▒, heavy=▓, mixed=░▒▓.",        "update_available": "Actualización disponible",
         "help_check_updates": "Revisa GitHub Releases para buscar actualizaciones. Activado por default.",
         "help_no_check_updates": "Desactiva la búsqueda de actualizaciones en GitHub.",
-        "help_update_repo": "Repo de GitHub para buscar actualizaciones, en formato owner/repo.",
+        "help_update_repo": "Repo de GitHub para buscar actualizaciones, en formato owner/repo.",        "help_install": "Instala un lanzador global en ~/.local/bin y sale.",
+        "help_uninstall": "Elimina el lanzador global y el script instalado, luego sale.",
+        "help_install_name": "Nombre del comando para --install/--uninstall. Default: aetherless-meter.",
+        "help_no_modify_path": "No modifica la config del shell/PATH durante --install.",        "score": "Score",
+        "col_score": "Rel%",
+        "help_score_mode": "Score relativo local basado en DPS. off, overall, role o job. No es un parse de FFLogs.",
+
+
 
         "help_ws": "URL completa del WebSocket. Reemplaza --host, --port y --path.",
         "help_host": "IP del host IINACT/OverlayPlugin. Default: 127.0.0.1",
@@ -208,7 +442,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "help_privacy_style": "隐私遮罩样式。light=░, medium=▒, heavy=▓, mixed=░▒▓。",        "update_available": "有可用更新",
         "help_check_updates": "检查 GitHub Releases 更新。默认启用。",
         "help_no_check_updates": "禁用 GitHub 更新检查。",
-        "help_update_repo": "用于更新检查的 GitHub 仓库，格式为 owner/repo。",
+        "help_update_repo": "用于更新检查的 GitHub 仓库，格式为 owner/repo。",        "help_install": "安装全局启动器到 ~/.local/bin 后退出。",
+        "help_uninstall": "移除全局启动器和已安装脚本后退出。",
+        "help_install_name": "--install/--uninstall 使用的命令名。默认: aetherless-meter。",
+        "help_no_modify_path": "安装时不修改 shell 配置或 PATH。",        "score": "评分",
+        "col_score": "相对%",
+        "help_score_mode": "可选的本地 DPS 相对评分。off, overall, role 或 job。不是 FFLogs parse。",
+
+
 
         "help_ws": "完整 WebSocket URL。会覆盖 --host、--port 和 --path。",
         "help_host": "IINACT/OverlayPlugin 主机 IP。默认: 127.0.0.1",
@@ -264,7 +505,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "help_privacy_style": "Style du masque. light=░, medium=▒, heavy=▓, mixed=░▒▓.",        "update_available": "Mise à jour disponible",
         "help_check_updates": "Vérifie les mises à jour via GitHub Releases. Activé par défaut.",
         "help_no_check_updates": "Désactive la vérification des mises à jour GitHub.",
-        "help_update_repo": "Dépôt GitHub utilisé pour les mises à jour, au format owner/repo.",
+        "help_update_repo": "Dépôt GitHub utilisé pour les mises à jour, au format owner/repo.",        "help_install": "Installe un lanceur global dans ~/.local/bin puis quitte.",
+        "help_uninstall": "Supprime le lanceur global et le script installé puis quitte.",
+        "help_install_name": "Nom de commande pour --install/--uninstall. Défaut: aetherless-meter.",
+        "help_no_modify_path": "Ne modifie pas la configuration du shell/PATH pendant --install.",        "score": "Score",
+        "col_score": "Rel%",
+        "help_score_mode": "Score relatif local basé sur le DPS. off, overall, role ou job. Ce n'est pas un parse FFLogs.",
+
+
 
         "help_ws": "URL WebSocket complète. Remplace --host, --port et --path.",
         "help_host": "IP de l'hôte IINACT/OverlayPlugin. Défaut: 127.0.0.1",
@@ -320,7 +568,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "help_privacy_style": "Maskierungsstil. light=░, medium=▒, heavy=▓, mixed=░▒▓.",        "update_available": "Update verfügbar",
         "help_check_updates": "Prüft GitHub Releases auf Updates. Standardmäßig aktiviert.",
         "help_no_check_updates": "Deaktiviert die GitHub-Updateprüfung.",
-        "help_update_repo": "GitHub-Repository für Updateprüfungen im Format owner/repo.",
+        "help_update_repo": "GitHub-Repository für Updateprüfungen im Format owner/repo.",        "help_install": "Installiert einen globalen Starter in ~/.local/bin und beendet.",
+        "help_uninstall": "Entfernt den globalen Starter und das installierte Skript, dann beendet.",
+        "help_install_name": "Befehlsname für --install/--uninstall. Standard: aetherless-meter.",
+        "help_no_modify_path": "Shell-Konfiguration/PATH während --install nicht ändern.",        "score": "Score",
+        "col_score": "Rel%",
+        "help_score_mode": "Optionaler lokaler DPS-basierter Relativscore. off, overall, role oder job. Kein FFLogs-Parse.",
+
+
 
         "help_ws": "Vollständige WebSocket-URL. Überschreibt --host, --port und --path.",
         "help_host": "IINACT/OverlayPlugin Host-IP. Standard: 127.0.0.1",
@@ -376,7 +631,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "help_privacy_style": "마스크 스타일. light=░, medium=▒, heavy=▓, mixed=░▒▓.",        "update_available": "업데이트 있음",
         "help_check_updates": "GitHub Releases에서 업데이트를 확인합니다. 기본으로 활성화됩니다.",
         "help_no_check_updates": "GitHub 업데이트 확인을 비활성화합니다.",
-        "help_update_repo": "업데이트 확인에 사용할 GitHub 저장소(owner/repo 형식).",
+        "help_update_repo": "업데이트 확인에 사용할 GitHub 저장소(owner/repo 형식).",        "help_install": "~/.local/bin에 전역 실행기를 설치하고 종료합니다.",
+        "help_uninstall": "전역 실행기와 설치된 스크립트를 제거하고 종료합니다.",
+        "help_install_name": "--install/--uninstall에 사용할 명령 이름. 기본값: aetherless-meter.",
+        "help_no_modify_path": "--install 중 shell 설정/PATH를 수정하지 않습니다.",        "score": "점수",
+        "col_score": "상대%",
+        "help_score_mode": "선택적 로컬 DPS 기반 상대 점수. off, overall, role, job. FFLogs parse가 아닙니다.",
+
+
 
         "help_ws": "전체 WebSocket URL. --host, --port, --path를 덮어씁니다.",
         "help_host": "IINACT/OverlayPlugin 호스트 IP. 기본값: 127.0.0.1",
@@ -432,7 +694,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "help_privacy_style": "マスクの種類。light=░, medium=▒, heavy=▓, mixed=░▒▓。",        "update_available": "更新があります",
         "help_check_updates": "GitHub Releases で更新を確認します。既定で有効です。",
         "help_no_check_updates": "GitHub 更新チェックを無効にします。",
-        "help_update_repo": "更新チェックに使う GitHub リポジトリ（owner/repo形式）。",
+        "help_update_repo": "更新チェックに使う GitHub リポジトリ（owner/repo形式）。",        "help_install": "~/.local/bin にグローバルランチャーをインストールして終了します。",
+        "help_uninstall": "グローバルランチャーとインストール済みスクリプトを削除して終了します。",
+        "help_install_name": "--install/--uninstall のコマンド名。既定: aetherless-meter。",
+        "help_no_modify_path": "--install 時にシェル設定/PATHを変更しません。",        "score": "スコア",
+        "col_score": "相対%",
+        "help_score_mode": "任意のローカルDPS相対スコア。off, overall, role, job。FFLogs parseではありません。",
+
+
 
         "help_ws": "完全な WebSocket URL。--host、--port、--path を上書きします。",
         "help_host": "IINACT/OverlayPlugin のホストIP。既定: 127.0.0.1",
@@ -752,7 +1021,113 @@ def update_from_message(state: MeterState, message: dict[str, Any]) -> None:
     state.last_update = time.time()
 
 
-def build_header(state: MeterState, update_state: UpdateState, ws_url: str, show_hps: bool, limit: int, bar_mode: str, privacy_mode: str, privacy_style: str, lang: str) -> Panel:
+
+JOB_ROLES = {
+    "PLD": "tank",
+    "WAR": "tank",
+    "DRK": "tank",
+    "GNB": "tank",
+    "WHM": "healer",
+    "SCH": "healer",
+    "AST": "healer",
+    "SGE": "healer",
+    "MNK": "melee",
+    "DRG": "melee",
+    "NIN": "melee",
+    "SAM": "melee",
+    "RPR": "melee",
+    "VPR": "melee",
+    "BRD": "ranged",
+    "MCH": "ranged",
+    "DNC": "ranged",
+    "BLM": "caster",
+    "SMN": "caster",
+    "RDM": "caster",
+    "PCT": "caster",
+    "BLU": "caster",
+}
+
+
+def normalize_job(job: str) -> str:
+    return job.strip().upper()
+
+
+def job_role(job: str) -> str:
+    return JOB_ROLES.get(normalize_job(job), "unknown")
+
+
+def score_group_key(score_mode: str, job: str) -> str:
+    if score_mode == "overall":
+        return "overall"
+    if score_mode == "role":
+        return job_role(job)
+    if score_mode == "job":
+        return normalize_job(job) or "unknown"
+    return "off"
+
+
+def build_relative_scores(rows: list[tuple[float, float, str, dict[str, Any]]], score_mode: str) -> dict[str, float | None]:
+    """Return local DPS-based relative scores for raw combatant names.
+
+    This is intentionally not an FFLogs parse. It only compares visible/current encounter rows.
+    Groups with fewer than two valid members return None to avoid misleading 100% solo scores.
+    """
+    if score_mode == "off":
+        return {}
+
+    groups: dict[str, list[tuple[str, float]]] = {}
+    for dps_value, _hps_value, raw_name, data in rows:
+        if dps_value <= 0:
+            continue
+        job = pick(data, "Job", "job", "JOB", default="-")
+        key = score_group_key(score_mode, job)
+        groups.setdefault(key, []).append((raw_name, dps_value))
+
+    scores: dict[str, float | None] = {}
+    for members in groups.values():
+        if len(members) < 2:
+            for raw_name, _dps_value in members:
+                scores[raw_name] = None
+            continue
+
+        max_dps = max(dps for _raw_name, dps in members)
+        for raw_name, dps_value in members:
+            scores[raw_name] = (dps_value / max_dps * 100.0) if max_dps > 0 else None
+
+    return scores
+
+
+def relative_score_style(value: float | None) -> str:
+    """FFLogs-inspired terminal colors for local Relative Score.
+
+    This is only a visual aid for Aetherless Meter's local Relative Score.
+    It is not an FFLogs parse/ranking.
+    """
+    if value is None:
+        return "dim"
+
+    if value >= 100:
+        return "bold gold1"
+    if value >= 99:
+        return "bold deeppink1"
+    if value >= 95:
+        return "bold orange1"
+    if value >= 75:
+        return "bold purple"
+    if value >= 50:
+        return "bold blue"
+    if value >= 25:
+        return "bold green"
+    return "bold grey50"
+
+
+def format_relative_score(value: float | None) -> Text:
+    if value is None:
+        return Text("-", style="dim")
+    return Text(f"{value:.0f}", style=relative_score_style(value))
+
+
+def build_header(state: MeterState, update_state: UpdateState, ws_url: str, show_hps: bool, limit: int, bar_mode: str, score_mode: str, privacy_mode: str, privacy_style: str, lang: str) -> Panel:
     encounter = state.encounter
     title = pick(encounter, "title", "Title", "Encounter", default="...")
     duration = pick(encounter, "duration", "DURATION", "Duration", default="00:00")
@@ -778,7 +1153,10 @@ def build_header(state: MeterState, update_state: UpdateState, ws_url: str, show
     privacy_text = ""
     if privacy_mode != "off":
         privacy_text = f"  •  {tr(lang, 'privacy')}: {privacy_label(lang, privacy_mode)}"
-    header.append(f"\n{status}  •  {tr(lang, 'rows')}: {limit}  •  {tr(lang, 'bars')}: {bar_mode}{privacy_text}\n")
+    score_text = ""
+    if score_mode != "off":
+        score_text = f"  •  {tr(lang, 'score')}: {score_mode}"
+    header.append(f"\n{status}  •  {tr(lang, 'rows')}: {limit}  •  {tr(lang, 'bars')}: {bar_mode}{score_text}{privacy_text}\n")
     header.append(
         f"{tr(lang, 'encounter')}: {title}  •  {tr(lang, 'time')}: {duration}  •  {tr(lang, 'raid_dps')}: {rdps}"
     )
@@ -812,6 +1190,7 @@ def build_table(
     player_name: str,
     bar_mode: str,
     bar_width: int,
+    score_mode: str,
     privacy_mode: str,
     privacy_style: str,
     lang: str,
@@ -822,6 +1201,8 @@ def build_table(
     table.add_column(tr(lang, "col_name"), no_wrap=True, ratio=2)
     table.add_column(tr(lang, "col_dps"), justify="right")
     table.add_column(tr(lang, "col_dps_bar"), ratio=2)
+    if score_mode != "off":
+        table.add_column(tr(lang, "col_score"), justify="right", width=6)
     if show_hps:
         table.add_column(tr(lang, "col_hps"), justify="right")
         table.add_column(tr(lang, "col_hps_bar"), ratio=2)
@@ -843,6 +1224,8 @@ def build_table(
 
     if not rows:
         empty_row = ["-", "-", tr(lang, "waiting_combatdata"), "-", "-"]
+        if score_mode != "off":
+            empty_row.append("-")
         if show_hps:
             empty_row.extend(["-", "-"])
         empty_row.extend(["-", "-", "-", "-", "-"])
@@ -851,6 +1234,7 @@ def build_table(
 
     max_dps = max((row[0] for row in rows), default=0.0)
     max_hps = max((row[1] for row in rows), default=0.0)
+    relative_scores = build_relative_scores(rows, score_mode)
 
     for idx, (dps_value, hps_value, raw_name, data) in enumerate(rows[:limit], start=1):
         job = pick(data, "Job", "job", "JOB", default="-")
@@ -872,6 +1256,9 @@ def build_table(
             make_bar(dps_value, max_dps, width=bar_width, mode=bar_mode, job=job),
         ]
 
+        if score_mode != "off":
+            row.append(format_relative_score(relative_scores.get(raw_name)))
+
         if show_hps:
             row.extend([hps, make_bar(hps_value, max_hps, width=bar_width, mode=bar_mode, job=job)])
 
@@ -891,13 +1278,14 @@ def build_screen(
     player_name: str,
     bar_mode: str,
     bar_width: int,
+    score_mode: str,
     privacy_mode: str,
     privacy_style: str,
     lang: str,
 ):
     return Group(
-        build_header(state, update_state, ws_url, show_hps, limit, bar_mode, privacy_mode, privacy_style, lang),
-        build_table(state, limit, show_limit_break, show_hps, player_name, bar_mode, bar_width, privacy_mode, privacy_style, lang),
+        build_header(state, update_state, ws_url, show_hps, limit, bar_mode, score_mode, privacy_mode, privacy_style, lang),
+        build_table(state, limit, show_limit_break, show_hps, player_name, bar_mode, bar_width, score_mode, privacy_mode, privacy_style, lang),
         Align.left(Text(tr(lang, "footer"), style="dim")),
     )
 
@@ -944,19 +1332,20 @@ async def ui_loop(
     player_name: str,
     bar_mode: str,
     bar_width: int,
+    score_mode: str,
     privacy_mode: str,
     privacy_style: str,
     refresh_per_second: int,
     lang: str,
 ) -> None:
     with Live(
-        build_screen(state, update_state, ws_url, limit, show_limit_break, show_hps, player_name, bar_mode, bar_width, privacy_mode, privacy_style, lang),
+        build_screen(state, update_state, ws_url, limit, show_limit_break, show_hps, player_name, bar_mode, bar_width, score_mode, privacy_mode, privacy_style, lang),
         console=console,
         refresh_per_second=refresh_per_second,
         screen=True,
     ) as live:
         while True:
-            live.update(build_screen(state, update_state, ws_url, limit, show_limit_break, show_hps, player_name, bar_mode, bar_width, privacy_mode, privacy_style, lang))
+            live.update(build_screen(state, update_state, ws_url, limit, show_limit_break, show_hps, player_name, bar_mode, bar_width, score_mode, privacy_mode, privacy_style, lang))
             await asyncio.sleep(1 / max(refresh_per_second, 1))
 
 
@@ -978,6 +1367,17 @@ async def delayed_check_for_updates(
     except Exception:
         # Update checks should never disrupt the meter.
         return
+
+
+
+def install_launcher(command_name: str = "aetherless-meter", modify_path: bool = True) -> None:
+    """Install Aetherless Meter using a private virtual environment."""
+    _early_install(command_name, modify_path)
+
+
+def uninstall_launcher(command_name: str = "aetherless-meter") -> None:
+    """Remove the installed launcher and private virtual environment."""
+    _early_uninstall(command_name)
 
 
 def build_ws_url(args: argparse.Namespace) -> str:
@@ -1005,6 +1405,7 @@ def parse_args() -> argparse.Namespace:
   ffxiv-tui --host FFXIV_PC_IP --alliance --bar-mode job --bar-width 10
   ffxiv-tui --host FFXIV_PC_IP --lang es
   ffxiv-tui --host FFXIV_PC_IP --privacy-mode all
+  ffxiv-tui --host FFXIV_PC_IP --score-mode role
   ffxiv-tui --host FFXIV_PC_IP --privacy-mode self
   ffxiv-tui --ws ws://127.0.0.1:10501/ws --dump
 """
@@ -1015,6 +1416,10 @@ def parse_args() -> argparse.Namespace:
         epilog=examples,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    parser.add_argument("--install", action="store_true", help=tr(help_lang, "help_install"))
+    parser.add_argument("--uninstall", action="store_true", help=tr(help_lang, "help_uninstall"))
+    parser.add_argument("--install-name", default="aetherless-meter", help=tr(help_lang, "help_install_name"))
+    parser.add_argument("--no-modify-path", action="store_true", help=tr(help_lang, "help_no_modify_path"))
     parser.add_argument("--ws", default="", help=tr(help_lang, "help_ws"))
     parser.add_argument("--host", default="127.0.0.1", help=tr(help_lang, "help_host"))
     parser.add_argument("--port", type=int, default=10501, help=tr(help_lang, "help_port"))
@@ -1050,6 +1455,12 @@ def parse_args() -> argparse.Namespace:
         help=tr(help_lang, "help_bar_mode"),
     )
     parser.add_argument("--bar-width", type=int, default=18, help=tr(help_lang, "help_bar_width"))
+    parser.add_argument(
+        "--score-mode",
+        choices=["off", "overall", "role", "job"],
+        default="off",
+        help=tr(help_lang, "help_score_mode"),
+    )
     parser.add_argument("--dump", action="store_true", help=tr(help_lang, "help_dump"))
     args = parser.parse_args()
     args.lang = resolve_lang(args.lang)
@@ -1058,6 +1469,14 @@ def parse_args() -> argparse.Namespace:
 
 async def main() -> None:
     args = parse_args()
+
+    if getattr(args, "install", False):
+        install_launcher(getattr(args, "install_name", "aetherless-meter"), not getattr(args, "no_modify_path", False))
+        return
+
+    if getattr(args, "uninstall", False):
+        uninstall_launcher(getattr(args, "install_name", "aetherless-meter"))
+        return
 
     state = MeterState()
     update_state = UpdateState(enabled=args.check_updates)
@@ -1087,6 +1506,7 @@ async def main() -> None:
             args.player_name,
             args.bar_mode,
             args.bar_width,
+            args.score_mode,
             args.privacy_mode,
             args.privacy_style,
             args.refresh,

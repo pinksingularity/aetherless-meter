@@ -4,12 +4,9 @@
 
 Un medidor de combate para terminal usando datos del **WebSocket de IINACT / OverlayPlugin**.
 
-<img width="1024" height="447" alt="image" src="https://github.com/user-attachments/assets/1ceb3b6c-b27b-4819-87de-8adf90ddefe0" />
+Aetherless Meter es Linux-first y está diseñado para setups de terminal, equipos ligeros, segunda pantalla o entornos mínimos.
 
-
-Puede correr en la misma PC de FFXIV o en una laptop/mini PC ligera por LAN.
-
-El ejecutable sigue siendo `ffxiv-tui` para que sea claro y fácil de encontrar.
+El ejecutable/script sigue siendo `ffxiv-tui` por claridad, mientras que el lanzador instalado es `aetherless-meter`.
 
 ## Funciones
 
@@ -18,12 +15,25 @@ El ejecutable sigue siendo `ffxiv-tui` para que sea claro y fácil de encontrar.
 - Columnas opcionales de HPS
 - Modo alliance de 24 jugadores
 - Barras por job o plain
+- Relative Score local opcional
 - Modo de privacidad para ocultar nombres, URL WebSocket y errores de conexión con caracteres sombreados de terminal
-- Aviso automático de actualización desde GitHub Releases
+- Avisos automáticos de actualización desde GitHub Releases
 - Reconexión automática
 - Cierre limpio con Ctrl+C
+- Salida de `--help` siempre en inglés
 - UI multi-idioma: inglés, español, chino, francés, alemán, coreano y japonés
 - Host, puerto, ruta o WebSocket URL completa configurables
+- Instalador con entorno virtual privado y lanzador global
+
+## Soporte de plataformas
+
+| Plataforma | Estado | Notas |
+|---|---|---|
+| Linux | Probado / objetivo principal | Plataforma recomendada. Diseñado alrededor de setups ligeros y terminal-first. |
+| Windows | Experimental / no probado | La app en Python podría funcionar con PowerShell o Windows Terminal, pero el instalador actual está orientado a Linux. |
+| macOS | No probado | Podría funcionar en teoría por estar basado en Python, pero no se ha probado un setup FFXIV/macOS. |
+
+Aetherless Meter está pensado principalmente para personas que quieren un medidor en terminal, setup de segunda pantalla o alternativa ligera y amigable para Linux.
 
 ## Requisitos
 
@@ -32,6 +42,52 @@ El ejecutable sigue siendo `ffxiv-tui` para que sea claro y fácil de encontrar.
 - Terminal con soporte Unicode
 
 ## Instalación
+
+Instalación recomendada:
+
+```bash
+python ffxiv_tui.py --install
+```
+
+Esto crea un entorno virtual privado en:
+
+```text
+~/.local/share/aetherless-meter/venv
+```
+
+e instala un lanzador global en:
+
+```text
+~/.local/bin/aetherless-meter
+```
+
+El instalador intenta detectar `bash`, `zsh` o `fish` y agrega `~/.local/bin` a la configuración del shell correspondiente automáticamente.
+
+Después de instalar, puedes ejecutarlo inmediatamente con la ruta completa del lanzador:
+
+```bash
+~/.local/bin/aetherless-meter
+```
+
+Después de reiniciar la terminal o recargar la configuración del shell, ejecútalo desde cualquier lugar con:
+
+```bash
+aetherless-meter
+```
+
+Omitir cambios en PATH/configuración del shell:
+
+```bash
+python ffxiv_tui.py --install --no-modify-path
+```
+
+Desinstalar:
+
+```bash
+aetherless-meter --uninstall
+```
+
+Instalación manual para desarrollo:
 
 ```bash
 python -m venv ~/.local/share/ffxiv-tui
@@ -50,13 +106,13 @@ source ~/.local/share/ffxiv-tui/bin/activate.fish
 Misma PC donde corre IINACT / OverlayPlugin:
 
 ```bash
-./ffxiv-tui
+aetherless-meter
 ```
 
 Segunda PC/laptop por LAN:
 
 ```bash
-./ffxiv-tui --host FFXIV_PC_IP
+aetherless-meter --host FFXIV_PC_IP
 ```
 
 Reemplaza `FFXIV_PC_IP` por la IP LAN de la máquina donde corre FFXIV e IINACT / OverlayPlugin.
@@ -64,19 +120,19 @@ Reemplaza `FFXIV_PC_IP` por la IP LAN de la máquina donde corre FFXIV e IINACT 
 Modo alliance:
 
 ```bash
-./ffxiv-tui --host FFXIV_PC_IP --alliance --bar-mode job --bar-width 10
+aetherless-meter --host FFXIV_PC_IP --alliance --bar-mode job --bar-width 10
 ```
 
 Barras sin color:
 
 ```bash
-./ffxiv-tui --host FFXIV_PC_IP --bar-mode plain
+aetherless-meter --host FFXIV_PC_IP --bar-mode plain
 ```
 
 Mostrar HPS:
 
 ```bash
-./ffxiv-tui --host FFXIV_PC_IP --show-hps
+aetherless-meter --host FFXIV_PC_IP --show-hps
 ```
 
 ## Aviso de actualización
@@ -94,111 +150,141 @@ pinksingularity/aetherless-meter
 Desactivar búsqueda de actualizaciones:
 
 ```bash
-./ffxiv-tui --no-check-updates
+aetherless-meter --no-check-updates
 ```
 
 Usar otro repo para buscar actualizaciones:
 
 ```bash
-./ffxiv-tui --update-repo owner/repo
+aetherless-meter --update-repo owner/repo
 ```
 
 Ajustar tiempos del update check:
 
 ```bash
-./ffxiv-tui --update-delay 2 --update-timeout 1.5
+aetherless-meter --update-delay 2 --update-timeout 1.5
 ```
+
 ## Modo de privacidad
 
-Oculta nombres usando caracteres sombreados de terminal.
+Oculta nombres e información potencialmente sensible usando caracteres sombreados de terminal.
 
 Ocultar a todos:
 
 ```bash
-./ffxiv-tui --host FFXIV_PC_IP --privacy-mode all
+aetherless-meter --privacy-mode all
 ```
 
 Ocultarte solo a ti:
 
 ```bash
-./ffxiv-tui --host FFXIV_PC_IP --privacy-mode self
+aetherless-meter --privacy-mode self
 ```
 
 Ocultar a todos excepto a ti:
 
 ```bash
-./ffxiv-tui --host FFXIV_PC_IP --privacy-mode others
+aetherless-meter --privacy-mode others
 ```
 
 Estilos de máscara:
 
 ```bash
-./ffxiv-tui --privacy-mode all --privacy-style light
-./ffxiv-tui --privacy-mode all --privacy-style medium
-./ffxiv-tui --privacy-mode all --privacy-style heavy
-./ffxiv-tui --privacy-mode all --privacy-style mixed
+aetherless-meter --privacy-mode all --privacy-style light
+aetherless-meter --privacy-mode all --privacy-style medium
+aetherless-meter --privacy-mode all --privacy-style heavy
+aetherless-meter --privacy-mode all --privacy-style mixed
 ```
 
 Los estilos usan `░`, `▒`, `▓` o un patrón mixto.
+
+El modo de privacidad puede ocultar:
+
+- nombres de jugadores
+- nombre detectado en el header
+- URL WebSocket
+- texto de errores de conexión
+
+## Relative Score
+
+Aetherless Meter incluye un modo opcional de **Relative Score** local.
+
+Esto **no** es un parse de FFLogs. No usa datos de FFLogs, rankings históricos, partitions de bosses ni estadísticas globales por job.
+
+Solo compara el DPS visible/actual dentro de Aetherless Meter.
+
+Ejemplos:
+
+```bash
+aetherless-meter --score-mode overall
+aetherless-meter --score-mode role
+aetherless-meter --score-mode job
+```
+
+Modos:
+
+- `off`: desactivado
+- `overall`: compara DPS contra todos los combatientes visibles
+- `role`: compara DPS contra el mismo grupo de rol
+- `job`: compara DPS contra el mismo job, útil solo si hay duplicados
+
+Los grupos con menos de dos miembros válidos muestran `-` para evitar un 100 solitario y engañoso.
+
+Relative Score usa colores de terminal inspirados en FFLogs como ayuda visual, pero sigue sin ser un parse de FFLogs.
+
+## Nota sobre FFLogs / Archon
+
+Aetherless Meter **no** sube logs a FFLogs y **no** reemplaza FFLogs Uploader ni Archon.
+
+Lee datos live del WebSocket para mostrarlos en una terminal ligera. Para logs oficiales, parses, rankings y análisis post-pull, usa las herramientas de FFLogs / Archon.
 
 ## Opciones WebSocket
 
 Usar WebSocket URL manual:
 
 ```bash
-./ffxiv-tui --ws ws://FFXIV_PC_IP:10501/ws
+aetherless-meter --ws ws://FFXIV_PC_IP:10501/ws
 ```
 
 Si tu IINACT usa `/` en vez de `/ws`:
 
 ```bash
-./ffxiv-tui --host FFXIV_PC_IP --path /
+aetherless-meter --host FFXIV_PC_IP --path /
 ```
 
 ## Idiomas
 
 La salida de `--help` siempre se muestra en inglés. El idioma de la TUI sigue controlándose con `--lang` y por default usa `auto`.
 
-
-
 El idioma predeterminado es `auto`. Intenta usar el locale del sistema y, si no reconoce uno compatible, cae a inglés.
 
 ```bash
-./ffxiv-tui --lang auto
+aetherless-meter --lang auto
 ```
 
 Opciones disponibles:
 
 ```bash
-./ffxiv-tui --lang en
-./ffxiv-tui --lang es
-./ffxiv-tui --lang zh
-./ffxiv-tui --lang fr
-./ffxiv-tui --lang de
-./ffxiv-tui --lang ko
-./ffxiv-tui --lang ja
+aetherless-meter --lang en
+aetherless-meter --lang es
+aetherless-meter --lang zh
+aetherless-meter --lang fr
+aetherless-meter --lang de
+aetherless-meter --lang ko
+aetherless-meter --lang ja
 ```
 
-## Configuración de IINACT / OverlayPlugin
+## Uso de recursos
 
-Para usarlo en la misma PC, el default normalmente basta:
+Aetherless Meter está diseñado para ser ligero. No guarda historial largo de combate; solo mantiene el estado actual del encuentro en memoria.
+
+En pruebas actuales con Linux/Konsole, usó alrededor de **40 MiB RSS**, aunque esto puede variar según Python, terminal, librerías del sistema y setup.
+
+Para reducir uso de CPU, baja el refresh rate:
 
 ```bash
-./ffxiv-tui
+aetherless-meter --refresh 2
 ```
-
-Para usarlo desde otra laptop/PC:
-
-1. Activa el WebSocket Server en IINACT / OverlayPlugin.
-2. Pon el listen/bind IP en `0.0.0.0`.
-3. Mantén el puerto `10501`, salvo que lo hayas cambiado.
-4. Conecta desde la segunda máquina usando la IP LAN de la PC de FFXIV:
-
-```bash
-./ffxiv-tui --host FFXIV_PC_IP
-```
-
-No expongas este puerto a internet. Úsalo solo en tu red local.
 
 ## Versionado
 
@@ -207,7 +293,7 @@ Las releases públicas usan un esquema simple tipo `v1.0`, `v1.1`, `v1.2`.
 - Las versiones mayores o hitos usan `.0`
 - Las versiones pequeñas de features/fixes suben en `.1`
 
-Versión actual: **v1.1**
+Versión actual: **v2.0**
 
 
 ## Nota sobre el desarrollo
@@ -218,9 +304,11 @@ El mantenedor es responsable del código, el comportamiento, el empaquetado y la
 
 ## Notas
 
-Este proyecto no es oficial y no está afiliado a Square Enix, ACT, OverlayPlugin ni IINACT.
+v2.0 consolida los cambios hechos después de v1.2 y documenta el proyecto como un medidor terminal Linux-first más completo.
 
-Utiliza las herramientas de terceros de forma responsable y privada. Recuerda que este tipo de herramientas están pensadas para ayudarte a mejorar, no para gritar a los demás. Si ese es el caso, por favor, abstente de utilizar esta herramienta.
+Este proyecto no es oficial y no está afiliado con Square Enix, ACT, OverlayPlugin, IINACT, FFLogs ni Archon.
+
+Usa herramientas de terceros con responsabilidad y en privado. Recuerda que este tipo de herramientas están pensadas para ayudarte a mejorar, no para gritar a los demás. Si ese es el caso, por favor, abstente de utilizar esta herramienta.
 
 ## Preguntas frecuentes: ?
 
@@ -236,3 +324,4 @@ Arch Linux / Shell (TUI), i3 370M con 4 GB de RAM como segunda máquina para mos
 CachyOS / Kitty, Ghostty, Konsole, Alacritty, Ryzen 3 3200G, 20 GB de RAM
 
 (No se ha probado la compatibilidad con Windows)
+
