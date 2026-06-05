@@ -4,7 +4,7 @@
 
 A terminal combat meter for **IINACT / OverlayPlugin WebSocket** data.
 
-https://ko-fi.com/pinksingularity
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Z7J62034HA)
 
 <img width="1023" height="369" alt="597725864-6208b44b-0ec6-4906-a684-6e7db8cb6f5a" src="https://github.com/user-attachments/assets/0f26d3d5-370f-4229-8bcb-805fd9bde060" />
 
